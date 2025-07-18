@@ -12,6 +12,20 @@ pub mod prediction_market {
         resolution_time: i64,
     ) -> Result<()>{
         let market = &mut ctx.accounts.market; //this is poinnting to the new accoutn which was created during the struct instruction phase
+        let clock = Clock::get()?;
+        require!(outcomes.len() >= 2, ErrorCode::InvalidOutcomeCount); // == 
+        require!(resolution_time > clock.unix_timestamp, ErrorCode::InvalidResolutionTime)
+        require!(questoin.len() <= 200, ErrorCode::QuestionTooLong); // this might be >= 200
+
+        market.authority = *ctx.accounts.authority.key; // who is providing the ctf
+        market.question = question;
+        market.outcomes = outcomes;
+        market.resolution_time = resolution_time;
+        market.resolved = false;
+        market.total_bets = vec![0;2]; // didn;t understand this one
+        market.is_active = true;
+
+        ok(())
     }
 }
 
