@@ -52,7 +52,6 @@ pub mod prediction_market {
         bet.amount = amount;
         market.total_bets[outcome_index as usize] += amount;
         Ok(())
-
     }
 
     pub fn resolve_market(ctx: Context<ResolveMarket>, winning_outcome:u8)-> Result<()>{
