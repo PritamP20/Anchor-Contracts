@@ -32,6 +32,7 @@ A smart contract built using Solana and the Anchor framework that allows users t
 
 ## Project Structure
 
+```bash
 prediction-market/
 ├── programs/
 │ └── prediction_market/ # Rust contract code
@@ -40,6 +41,7 @@ prediction-market/
 ├── target/deploy/
 │ └── prediction_market.so # Compiled binary
 └── Anchor.toml # Anchor configuration
+```
 
 
 ---
