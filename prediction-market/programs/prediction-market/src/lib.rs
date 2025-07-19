@@ -139,7 +139,7 @@ pub struct ResolveMarket<'info> {
 
 #[derive(Accounts)]
 pub struct ClaimPayout<'info>{
-    #[account(has_one = authority)] //authority not in scope
+    #[account(mut, has_one = authority)] //authority not in scope
     pub market: Account<'info, Market>,
     #[account(mut)]
     pub authority: Signer<'info>,
