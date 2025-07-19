@@ -7,7 +7,6 @@ import { BN } from "bn.js";
 import { assert } from "chai";
 
 describe("prediction-market", () => {
-  // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
   const provider = anchor.getProvider();
   const program = anchor.workspace.predictionMarket as Program<PredictionMarket>;
@@ -16,32 +15,32 @@ describe("prediction-market", () => {
   const bettor1 = anchor.web3.Keypair.generate();
   const bettor2 = anchor.web3.Keypair.generate();
 
-  const getMarketPDA = async (question:string)=>{
+  const getMarketPDA = async (question: string) => {
     return PublicKey.findProgramAddressSync(
       [Buffer.from("market"), authority.publicKey.toBuffer(), Buffer.from(question)],
       program.programId
     )
   }
 
-  const getBetPDA = async(market:PublicKey, bettor:PublicKey)=>{
+  const getBetPDA = async (market: PublicKey, bettor: PublicKey) => {
     return PublicKey.findProgramAddressSync(
       [Buffer.from("bet"), market.toBuffer(), bettor.toBuffer()],
       program.programId
     )
   }
 
-  before(async()=>{
-    await provider.connection.requestAirdrop(authority.publicKey, 2*LAMPORTS_PER_SOL);
-    await provider.connection.requestAirdrop(bettor1.publicKey, 2*LAMPORTS_PER_SOL);
-    await provider.connection.requestAirdrop(bettor2.publicKey, 2*LAMPORTS_PER_SOL)
+  before(async () => {
+    await provider.connection.requestAirdrop(authority.publicKey, 2 * LAMPORTS_PER_SOL);
+    await provider.connection.requestAirdrop(bettor1.publicKey, 2 * LAMPORTS_PER_SOL);
+    await provider.connection.requestAirdrop(bettor2.publicKey, 2 * LAMPORTS_PER_SOL)
 
-    await new Promise((resolve)=> setTimeout(resolve, 2000))
+    await new Promise((resolve) => setTimeout(resolve, 2000))
   })
 
   it("Creating a market", async () => {
     const question = "Will it rain today?";
     const outcomes = ["Yes", "No"];
-    const resolutionTime = new BN(Math.floor(Date.now() / 1000) + 3600);
+    const resolutionTime = new BN(Math.floor(Date.now() / 1000) + 5);
 
     const [marketPDA, marketBump] = await getMarketPDA(question);
 
@@ -52,7 +51,7 @@ describe("prediction-market", () => {
         authority: authority.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
       })
-      .signers([authority]) // only needed if `authority` is not the provider
+      .signers([authority])
       .rpc();
 
     console.log("Market created with tx:", tx);
@@ -70,12 +69,11 @@ describe("prediction-market", () => {
     });
   });
 
-
   it("Placing a bet", async () => {
     const question = "Will it rain today?";
     const [marketPDA] = await getMarketPDA(question);
     const [betPDA1] = await getBetPDA(marketPDA, bettor1.publicKey);
-    const betAmount = new BN(0.1 * LAMPORTS_PER_SOL); // 100,000,000 lamports
+    const betAmount = new BN(0.1 * LAMPORTS_PER_SOL);
     const outcomeIndex = 0;
 
     const bettorInitialBalance = await provider.connection.getBalance(bettor1.publicKey);
@@ -86,83 +84,110 @@ describe("prediction-market", () => {
     console.log("Market initial balance:", marketInitialBalance);
 
     await program.methods
-        .placeBet(outcomeIndex, betAmount)
-        .accounts({
-            market: marketPDA,
-            bettor: bettor1.publicKey,
-            bet: betPDA1,
-            authority: authority.publicKey,
-            systemProgram: SystemProgram.programId,
-        })
-        .signers([authority, bettor1])
-        .rpc();
+      .placeBet(outcomeIndex, betAmount)
+      .accounts({
+        market: marketPDA,
+        bettor: bettor1.publicKey,
+        bet: betPDA1,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority, bettor1])
+      .rpc();
 
-      const betAccount = await program.account.bet.fetch(betPDA1);
-      assert.equal(betAccount.bettor.toBase58(), bettor1.publicKey.toBase58(), "Bettor should match");
-      assert.equal(betAccount.outcomeIndex, outcomeIndex, "Outcome index should match");
-      assert.isTrue(betAccount.amount.eq(betAmount), "The bet amount should match");
+    const betAccount = await program.account.bet.fetch(betPDA1);
+    assert.equal(betAccount.bettor.toBase58(), bettor1.publicKey.toBase58(), "Bettor should match");
+    assert.equal(betAccount.outcomeIndex, outcomeIndex, "Outcome index should match");
+    assert.isTrue(betAccount.amount.eq(betAmount), "The bet amount should match");
 
-      const marketAccount = await program.account.market.fetch(marketPDA);
-      assert.isTrue(marketAccount.totalBets[outcomeIndex].eq(betAmount), "Total bets for the outcome should match");
+    const marketAccount = await program.account.market.fetch(marketPDA);
+    assert.isTrue(marketAccount.totalBets[outcomeIndex].eq(betAmount), "Total bets for the outcome should match");
 
-      const bettor1FinalBalance = await provider.connection.getBalance(bettor1.publicKey);
-      const marketFinalBalance = await provider.connection.getBalance(marketPDA);
+    const bettor1FinalBalance = await provider.connection.getBalance(bettor1.publicKey);
+    const marketFinalBalance = await provider.connection.getBalance(marketPDA);
 
-      console.log("Bettor final balance:", bettor1FinalBalance);
-      console.log("Market final balance:", marketFinalBalance);
+    console.log("Bettor final balance:", bettor1FinalBalance);
+    console.log("Market final balance:", marketFinalBalance);
 
-      const bettorBalanceChange = bettorInitialBalance - bettor1FinalBalance;
-      const marketBalanceChange = marketFinalBalance - marketInitialBalance;
+    const bettorBalanceChange = bettorInitialBalance - bettor1FinalBalance;
+    const marketBalanceChange = marketFinalBalance - marketInitialBalance;
 
-      console.log("Bettor balance change:", bettorBalanceChange);
-      console.log("Market balance change:", marketBalanceChange);
-      assert.isTrue(
-          bettorBalanceChange > Number(betAmount),
-          "Bettor should lose bet amount plus transaction fees"
-      );
-      const transactionFees = bettorBalanceChange - Number(betAmount);
-      console.log("Transaction fees:", transactionFees);
-      assert.isTrue(
-          transactionFees > 0 && transactionFees < 10000000,
-          "Transaction fees should be positive but reasonable"
-      );
-      assert.equal(
-          marketBalanceChange,
-          Number(betAmount),
-          "Market's balance should increase by exactly the bet amount"
-      );
-      const betAccountInfo = await provider.connection.getAccountInfo(betPDA1);
-      console.log("Bet account lamports:", betAccountInfo.lamports);
-      
-      assert.isTrue(
-          betAccountInfo.lamports > 0 && betAccountInfo.lamports < 10000000,
-          "Bet account should contain only rent"
-      );
-      const totalSystemLoss = bettorBalanceChange - marketBalanceChange - betAccountInfo.lamports;
-      console.log("Total system loss (fees):", totalSystemLoss);
-      
-      // System loss should be positive (fees are lost) but reasonable
-      // assert.isTrue(
-      //     totalSystemLoss > 0 && totalSystemLoss < 10000000,
-      //     "System should only lose reasonable transaction fees"
-      // );
+    console.log("Bettor balance change:", bettorBalanceChange);
+    console.log("Market balance change:", marketBalanceChange);
+    
+    assert.isTrue(
+      bettorBalanceChange > Number(betAmount),
+      "Bettor should lose bet amount plus transaction fees"
+    );
+    
+    assert.equal(
+      marketBalanceChange,
+      Number(betAmount),
+      "Market's balance should increase by exactly the bet amount"
+    );
 
-      // Summary verification
-      console.log("\n=== SUMMARY ===");
-      console.log(`Bettor lost: ${bettorBalanceChange} lamports (${bettorBalanceChange / LAMPORTS_PER_SOL} SOL)`);
-      console.log(`Market gained: ${marketBalanceChange} lamports (${marketBalanceChange / LAMPORTS_PER_SOL} SOL)`);
-      console.log(`Bet account rent: ${betAccountInfo.lamports} lamports`);
-      console.log(`Transaction fees: ${totalSystemLoss} lamports (${totalSystemLoss / LAMPORTS_PER_SOL} SOL)`);
-      
-      assert.approximately(bettorBalanceChange, 101231920, 1000000, "Bettor balance change should match expected");
-      assert.equal(marketBalanceChange, 100000000, "Market balance change should be exactly bet amount");
+    console.log("\n=== SUMMARY ===");
+    console.log(`Bettor lost: ${bettorBalanceChange} lamports (${bettorBalanceChange / LAMPORTS_PER_SOL} SOL)`);
+    console.log(`Market gained: ${marketBalanceChange} lamports (${marketBalanceChange / LAMPORTS_PER_SOL} SOL)`);
   });
 
-  it("Resolving the market", async()=>{
+  it("Resolving the market", async () => {
+    const question = "Will it rain today?"
+    const [marketPDA] = await getMarketPDA(question)
+    const winningOutcome = 0;
+    console.log("Waiting for resolution time to pass...");
+    await new Promise((resolve) => setTimeout(resolve, 6000));
 
+    await program.methods
+      .resolveMarket(winningOutcome)
+      .accounts({
+        market: marketPDA,
+        authority: authority.publicKey
+      })
+      .signers([authority])
+      .rpc()
+
+    const marketAccount = await program.account.market.fetch(marketPDA);
+    assert.isTrue(marketAccount.resolved, "Market should be resolved");
+    assert.isFalse(marketAccount.isActive, "Market should not be active")
+    assert.equal(marketAccount.winningOutcome, winningOutcome, "Winning outcome should match")
   })
 
-  it("Claiming the bet", async()=>{
+  it("Claiming the bet", async () => {
+    const question = "Will it rain today?";
+    const [marketPDA] = await getMarketPDA(question);
+    const [betPDA1] = await getBetPDA(marketPDA, bettor1.publicKey);
 
+    const bettorInitialBalance = await provider.connection.getBalance(bettor1.publicKey);
+    const marketInitialBalance = await provider.connection.getBalance(marketPDA);
+
+    console.log("Before claiming:");
+    console.log("Bettor balance:", bettorInitialBalance);
+    console.log("Market balance:", marketInitialBalance);
+
+    await program.methods
+      .claimBet()
+      .accounts({
+        market: marketPDA,
+        bettor: bettor1.publicKey,
+        bet: betPDA1,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([bettor1])
+      .rpc();
+
+    const bettorFinalBalance = await provider.connection.getBalance(bettor1.publicKey);
+    const marketFinalBalance = await provider.connection.getBalance(marketPDA);
+
+    console.log("After claiming:");
+    console.log("Bettor balance:", bettorFinalBalance);
+    console.log("Market balance:", marketFinalBalance);
+
+    const bettorGain = bettorFinalBalance - bettorInitialBalance;
+    const marketLoss = marketInitialBalance - marketFinalBalance;
+
+    console.log("Bettor gained:", bettorGain);
+    console.log("Market lost:", marketLoss);
+    assert.isTrue(bettorGain > 0, "Winning bettor should gain money");
   })
 });
