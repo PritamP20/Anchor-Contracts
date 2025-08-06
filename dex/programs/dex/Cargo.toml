@@ -1,0 +1,51 @@
+# [package]
+# name = "dex"
+# version = "0.1.0"
+# description = "Created with Anchor"
+# edition = "2021"
+
+# [lib]
+# crate-type = ["cdylib", "lib"]
+# name = "dex"
+
+# [features]
+# default = []
+# cpi = ["no-entrypoint"]
+# no-entrypoint = []
+# no-idl = []
+# no-log-ix-name = []
+# idl-build = ["anchor-lang/idl-build"]
+
+
+# [dependencies]
+# anchor-lang = "0.31.1"
+# anchor-spl = "0.31.1"
+# bincode = { version = "1.3.3", features = ["serde"] }
+# serde = { version = "1.0", features = ["derive"] }
+
+# [dev-dependencies]
+# anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+
+
+[package]
+name = "dex"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "dex"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = {version = "0.31.1", features = ["init-if-needed"]}
+anchor-spl = "0.31.1"
+bincode = "1.3.3"
