@@ -1,23 +1,3 @@
-# [toolchain]
-# package_manager = "yarn"
-
-# [features]
-# resolution = true
-# skip-lint = false
-
-# [programs.localnet]
-# dex = "J5hVUNhGJSNj25NwRD5fF1k3dUT6MQdry9YC9CJvcdPB"
-
-# [registry]
-# url = "https://api.apr.dev"
-
-# [provider]
-# cluster = "localnet"
-# wallet = "~/.config/solana/id.json"
-
-# [scripts]
-# test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
-
 [toolchain]
 package_manager = "yarn"
 
@@ -26,15 +6,14 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-dex = "G8GU4fpCB4XuGbZLTo3iW2QrhQZzPMqQhbd4WxpYWi8P" # Change this to your devnet program ID if different
+dex = "76j3Mhhr64JU2Lj1FMV1dPErgmJMVgpPcm19nyx1XHDF"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "https://api.devnet.solana.com"
-wallet = "/Users/pritam/.config/solana/id.json"
-
+wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

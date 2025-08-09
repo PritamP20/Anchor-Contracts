@@ -1,10 +1,11 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{program::invoke_signed, instruction::Instruction};
+use anchor_lang::solana_program::keccak;
 use anchor_spl::token::{Token, TokenAccount, Transfer};
+use jupiter_cpi::cpi::accounts::SharedAccountsRoute;
+use jupiter_cpi::cpi::shared_accounts_route;
+use jupiter_cpi::ID as JUPITER_PROGRAM_ID;
 
-declare_id!("G8GU4fpCB4XuGbZLTo3iW2QrhQZzPMqQhbd4WxpYWi8P");
-
-const JUPITER_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+declare_id!("76j3Mhhr64JU2Lj1FMV1dPErgmJMVgpPcm19nyx1XHDF");
 
 #[program]
 pub mod dex {
@@ -16,20 +17,8 @@ pub mod dex {
         session.commitment = commitment;
         session.revealed = false;
         session.bump = ctx.bumps.session;
-        
-        msg!("Swap committed from: {:?}", ctx.program_id);
-        Ok(())
-    }
 
-    pub fn store_jupiter_instruction(
-        ctx: Context<StoreJupiterInstruction>, 
-        instruction_data: Vec<u8>
-    ) -> Result<()> {
-        let ix_account = &mut ctx.accounts.instruction_account;
-        ix_account.user = ctx.accounts.user.key();
-        ix_account.data = instruction_data;
-        ix_account.bump = ctx.bumps.instruction_account;
-        msg!("Jupiter instruction stored");
+        msg!("Swap committed");
         Ok(())
     }
 
@@ -40,13 +29,17 @@ pub mod dex {
         token_in: Pubkey,
         token_out: Pubkey,
         amount: u64,
-        jupiter_ix_data: Vec<u8>,
+        id: u64,
+        route_plan: Vec<jupiter_cpi::RoutePlanStep>,
+        quoted_out_amount: u64,
+        slippage_bps: u16,
+        platform_fee_bps: u8,
     ) -> Result<()> {
         let user_key = ctx.accounts.session.user;
         let session_bump = ctx.accounts.session.bump;
         let commitment = ctx.accounts.session.commitment;
         let is_revealed = ctx.accounts.session.revealed;
-        
+
         require!(user_key == ctx.accounts.user.key(), CustomError::Unauthorized);
         require!(!is_revealed, CustomError::AlreadyRevealed);
 
@@ -54,76 +47,45 @@ pub mod dex {
         buf.extend(token_out.as_ref());
         buf.extend(&amount.to_le_bytes());
         buf.extend(&salt);
-        let hash = anchor_lang::solana_program::keccak::hash(&buf).0;
+        let hash = keccak::hash(&buf).0;
         require!(hash == commitment, CustomError::CommitmentMismatch);
 
-        let session = &mut ctx.accounts.session;
-        session.revealed = true;
+        ctx.accounts.session.revealed = true;
 
-        if !jupiter_ix_data.is_empty() {
-            let ix: Instruction = bincode::deserialize(&jupiter_ix_data)
-                .map_err(|_| CustomError::DeserializeFailed)?;
+        let signer_seeds: &[&[u8]] = &[b"session", user_key.as_ref(), &[session_bump]];
+        let signers = &[signer_seeds];
 
-            require!(ix.program_id == JUPITER_PROGRAM_ID, CustomError::InvalidJupiterInstruction);
-            
-            // Execute the Jupiter swap with session as signer
-            invoke_signed(
-                &ix,
-                &ctx.remaining_accounts,
-                &[&[b"session", user_key.as_ref(), &[session_bump]]],
-            ).map_err(|_| CustomError::JupiterSwapFailed)?;
+        let accounts = SharedAccountsRoute {
+            token_program: ctx.accounts.token_program.to_account_info(),
+            program_authority: ctx.accounts.session.to_account_info(),
+            user_transfer_authority: ctx.accounts.user_transfer_authority.to_account_info(),
+            source_token_account: ctx.accounts.source_token_account.to_account_info(),
+            program_source_token_account: ctx.accounts.program_source_token_account.to_account_info(),
+            program_destination_token_account: ctx.accounts.program_destination_token_account.to_account_info(),
+            destination_token_account: ctx.accounts.destination_token_account.to_account_info(),
+            source_mint: ctx.accounts.source_mint.to_account_info(),
+            destination_mint: ctx.accounts.destination_mint.to_account_info(),
+            platform_fee_account: ctx.accounts.platform_fee_account.to_account_info(),
+            token_2022_program: ctx.accounts.token_2022_program.to_account_info(),
+        };
 
-            msg!("Jupiter swap executed successfully");
-        } else {
-            msg!("No Jupiter instruction provided - skipping swap execution");
-        }
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.jupiter_program.to_account_info(),
+            accounts,
+            signers,
+        );
 
-        msg!("Swap revealed and processed successfully");
-        Ok(())
-    }
+        shared_accounts_route(
+            cpi_ctx,
+            id,
+            route_plan,
+            amount,
+            quoted_out_amount,
+            slippage_bps,
+            platform_fee_bps,
+        ).map_err(|_| CustomError::JupiterSwapFailed)?;
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn reveal_and_swap_with_stored_ix(
-        ctx: Context<RevealSwapWithStoredIx>,
-        salt: [u8; 32],
-        token_in: Pubkey,
-        token_out: Pubkey,
-        amount: u64,
-    ) -> Result<()> {
-        let user_key = ctx.accounts.session.user;
-        let session_bump = ctx.accounts.session.bump;
-        let commitment = ctx.accounts.session.commitment;
-        let is_revealed = ctx.accounts.session.revealed;
-        
-        require!(user_key == ctx.accounts.user.key(), CustomError::Unauthorized);
-        require!(!is_revealed, CustomError::AlreadyRevealed);
-
-        let mut buf = token_in.as_ref().to_vec();
-        buf.extend(token_out.as_ref());
-        buf.extend(&amount.to_le_bytes());
-        buf.extend(&salt);
-        let hash = anchor_lang::solana_program::keccak::hash(&buf).0;
-        require!(hash == commitment, CustomError::CommitmentMismatch);
-
-        let session = &mut ctx.accounts.session;
-        session.revealed = true;
-
-        let ix_account = &ctx.accounts.instruction_account;
-        if !ix_account.data.is_empty() {
-            let ix: Instruction = bincode::deserialize(&ix_account.data)
-                .map_err(|_| CustomError::DeserializeFailed)?;
-
-            require!(ix.program_id == JUPITER_PROGRAM_ID, CustomError::InvalidJupiterInstruction);
-            
-            invoke_signed(
-                &ix,
-                &ctx.remaining_accounts,
-                &[&[b"session", user_key.as_ref(), &[session_bump]]],
-            ).map_err(|_| CustomError::JupiterSwapFailed)?;
-
-            msg!("Jupiter swap executed successfully");
-        }
-
+        msg!("Jupiter swap executed successfully");
         Ok(())
     }
 
@@ -135,22 +97,19 @@ pub mod dex {
         msg!("Commitment cancelled");
         Ok(())
     }
-    pub fn collect_protocol_fee(
-        ctx: Context<CollectProtocolFee>,
-        amount: u64,
-    ) -> Result<()> {
+
+    pub fn collect_protocol_fee(ctx: Context<CollectProtocolFee>, amount: u64) -> Result<()> {
         let session = &ctx.accounts.session;
         require!(session.revealed, CustomError::SwapNotRevealed);
         require!(session.user == ctx.accounts.user.key(), CustomError::Unauthorized);
 
         let fee_amount = amount / 1000; // 0.1% fee
-        
+
         if fee_amount > 0 && ctx.accounts.source_token_account.amount >= fee_amount {
-            let user_key = session.user;
-            let session_bump = session.bump;
-            let signer_seeds: &[&[u8]] = &[b"session", user_key.as_ref(), &[session_bump]];
+            let signer_seeds: &[&[u8]] =
+                &[b"session", session.user.as_ref(), &[session.bump]];
             let signers: &[&[&[u8]]] = &[signer_seeds];
-            
+
             let cpi_ctx = CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
@@ -160,7 +119,7 @@ pub mod dex {
                 },
                 signers,
             );
-            
+
             anchor_spl::token::transfer(cpi_ctx, fee_amount)?;
             msg!("Protocol fee collected: {}", fee_amount);
         }
@@ -186,23 +145,7 @@ pub struct CommitSwap<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(instruction_data: Vec<u8>)]
-pub struct StoreJupiterInstruction<'info> {
-    #[account(
-        init_if_needed,
-        payer = user,
-        seeds = [b"jupiter_ix", user.key().as_ref()],
-        bump,
-        space = 8 + 32 + 4 + instruction_data.len() + 1
-    )]
-    pub instruction_account: Account<'info, JupiterInstructionAccount>,
-    #[account(mut)]
-    pub user: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(salt: [u8; 32], token_in: Pubkey, token_out: Pubkey, amount: u64, jupiter_ix_data: Vec<u8>)]
+#[instruction(salt: [u8; 32], token_in: Pubkey, token_out: Pubkey, amount: u64)]
 pub struct RevealSwap<'info> {
     #[account(
         mut,
@@ -210,31 +153,22 @@ pub struct RevealSwap<'info> {
         bump = session.bump
     )]
     pub session: Account<'info, SwapSession>,
-    #[account(mut)]
-    pub user: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-#[instruction(salt: [u8; 32], token_in: Pubkey, token_out: Pubkey, amount: u64)]
-pub struct RevealSwapWithStoredIx<'info> {
-    #[account(
-        mut,
-        seeds = [b"session", user.key().as_ref()],
-        bump = session.bump
-    )]
-    pub session: Account<'info, SwapSession>,
-
-    #[account(
-        seeds = [b"jupiter_ix", user.key().as_ref()],
-        bump = instruction_account.bump
-    )]
-    pub instruction_account: Account<'info, JupiterInstructionAccount>,
 
     #[account(mut)]
     pub user: Signer<'info>,
+
+    pub jupiter_program: Program<'info, jupiter_cpi::program::Jupiter>,
     pub token_program: Program<'info, Token>,
+    pub user_transfer_authority: AccountInfo<'info>,
+    pub source_token_account: Account<'info, TokenAccount>,
+    pub program_source_token_account: Account<'info, TokenAccount>,
+    pub program_destination_token_account: Account<'info, TokenAccount>,
+    pub destination_token_account: Account<'info, TokenAccount>,
+    pub source_mint: AccountInfo<'info>,
+    pub destination_mint: AccountInfo<'info>,
+    pub platform_fee_account: Account<'info, TokenAccount>,
+    pub token_2022_program: AccountInfo<'info>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -274,13 +208,6 @@ pub struct SwapSession {
     pub bump: u8,
 }
 
-#[account]
-pub struct JupiterInstructionAccount {
-    pub user: Pubkey,
-    pub data: Vec<u8>,
-    pub bump: u8,
-}
-
 #[error_code]
 pub enum CustomError {
     #[msg("Unauthorized")]
@@ -289,12 +216,9 @@ pub enum CustomError {
     AlreadyRevealed,
     #[msg("Commitment mismatch")]
     CommitmentMismatch,
-    #[msg("Deserialization failed")]
-    DeserializeFailed,
-    #[msg("Invalid Jupiter instruction")]
-    InvalidJupiterInstruction,
     #[msg("Jupiter swap failed")]
     JupiterSwapFailed,
     #[msg("Swap not revealed yet")]
     SwapNotRevealed,
 }
+
